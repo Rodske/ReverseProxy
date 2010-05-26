@@ -13,21 +13,25 @@ namespace ReverseProxy
 {
     public class ReverseProxyHandler : IHttpAsyncHandler
     {
-        static string[] _acceptedHeaders;
-        static string _destination;
         static bool _enabled;
+        static Hashtable _translations;
         // static Hashtable destinations;
 
         static ReverseProxyHandler()
         {
-            try
+            ProxyConfigurationSection __proxyConfiguration = ConfigurationManager.GetSection("proxy") as ProxyConfigurationSection;
+
+            if (__proxyConfiguration != null)
             {
-                _destination = ConfigurationManager.AppSettings["PROXY_DESTINATION_URL"].ToString();
-                _acceptedHeaders = ConfigurationManager.AppSettings["PROXY_ACCEPTED_HEADERS"].ToString().Split(',');
+                _translations = new Hashtable();
+
+                foreach (ProxyTranslation __translation in __proxyConfiguration.translations)
+                {
+                    _translations[__translation.request] = __translation;
+                }
                 _enabled = true;
             }
-            catch
-            {
+            else {
                 _enabled = false;
             }
         }
@@ -36,7 +40,10 @@ namespace ReverseProxy
         {
             if (_enabled)
             {
-                Uri _uri = new Uri(string.Format("{0}?{1}", _destination, context.Request.QueryString));
+                string __path = context.Request.AppRelativeCurrentExecutionFilePath; // Needs to be relative so it matches the values on the web.config
+                if (__path.StartsWith("~")) __path= __path.Substring(1); // stripping the ~
+                ProxyTranslation __translation = ((ProxyTranslation)_translations[__path]);
+                Uri _uri = new Uri(string.Format("{0}?{1}", __translation.destination, context.Request.QueryString));
 
                 HttpWebRequest _request = (HttpWebRequest)HttpWebRequest.Create(_uri);
                 _request.Method = context.Request.HttpMethod;
@@ -45,7 +52,7 @@ namespace ReverseProxy
                 //foreach (string _header in GetFilteredHeaders(context.Request.Headers.AllKeys))
                 //    _request.Headers.Add(_header, context.Request.Headers[_header]);
 
-                return new WebRequestResult(_request, cb, context, extraData);
+                return new WebRequestResult(_request, __translation, cb, context, extraData);
             }
             else
             {
@@ -56,13 +63,32 @@ namespace ReverseProxy
         public void EndProcessRequest(IAsyncResult result)
         {
             WebRequestResult _state = (WebRequestResult)result;
-            WebResponse _response = _state.response;
-            HttpContext _context = _state.context;
+            if (_state.response != null)
+            {
+                WebResponse _response = _state.response;
+                HttpContext _context = _state.context;
+                ProxyTranslation __translation = _state.translation;
 
-            foreach ( string _header in GetFilteredHeaders(_response.Headers.AllKeys))
-                _context.Response.AddHeader(_header, _response.Headers[_header]);
+                foreach (string _header in GetFilteredHeaders(__translation.headers, _response.Headers.AllKeys))
+                    _context.Response.AddHeader(_header, _response.Headers[_header]);
 
-            CopyStream(_response.GetResponseStream(),(_context.Response.OutputStream));
+                CopyStream(_response.GetResponseStream(), (_context.Response.OutputStream));
+            }
+            else if (_state.exception != null)
+            {
+                HttpWebResponse __response = (HttpWebResponse)_state.exception.Response;
+                if (__response == null)
+                {
+                    _state.context.Response.StatusCode = 404;
+                    _state.context.Response.StatusDescription = _state.exception.Message;
+                    _state.context.Response.End();
+                }
+                else {
+                    _state.context.Response.StatusCode = (int)__response.StatusCode;
+                    _state.context.Response.StatusDescription = __response.StatusDescription;
+                    _state.context.Response.End();
+                }
+            }
         }
 
         public bool IsReusable
@@ -75,10 +101,10 @@ namespace ReverseProxy
             throw new NotImplementedException();
         }
 
-        internal IEnumerable<string> GetFilteredHeaders ( IEnumerable<string> pHeaderCollection )
+        internal IEnumerable<string> GetFilteredHeaders ( string[] pAcceptedHeaders, IEnumerable<string> pHeaderCollection )
         {
             foreach( string _header in pHeaderCollection)
-                if (Array.Exists(_acceptedHeaders, _header.Equals))
+                if (Array.Exists(pAcceptedHeaders, _header.Equals))
                     yield return _header;
         }
 
@@ -94,50 +120,6 @@ namespace ReverseProxy
                 totalBytes += bytesRead;
             }
             return totalBytes;
-        }
-    }
-
-    public class WebRequestResult : IAsyncResult
-    {
-        public WebResponse response { get; private set; }
-        public HttpContext context { get; private set; }
-        public bool CompletedSynchronously { get { return false; } }
-        public bool IsCompleted { get; private set; }
-        public object AsyncState { get; private set; }
-        HttpWebRequest _request;
-        AsyncCallback _callback;
-
-        public System.Threading.WaitHandle AsyncWaitHandle
-        {
-            get { throw new NotImplementedException(); }
-        }
-
-        public WebRequestResult(HttpWebRequest pRequest, AsyncCallback pCallback, HttpContext pContext, object pState)
-        {
-            context = pContext;
-            _request = pRequest;
-            _callback = pCallback;
-            IsCompleted = false;
-            AsyncState = pState;
-
-            if (_request.Method.Equals("POST", StringComparison.InvariantCultureIgnoreCase))
-                _request.BeginGetRequestStream(new AsyncCallback(AsyncReturnStream), this);
-            else
-                _request.BeginGetResponse(new AsyncCallback(AsyncReturn), this);
-        }
-        private void AsyncReturnStream (IAsyncResult result)
-        {
-            Stream _stream = _request.EndGetRequestStream(result);
-            ReverseProxyHandler.CopyStream(context.Request.InputStream,_stream);
-            _stream.Close();
-            _request.BeginGetResponse(new AsyncCallback(AsyncReturn), this);
-        }
-        private void AsyncReturn(IAsyncResult result)
-        {
-            IsCompleted = true;
-            response = _request.EndGetResponse(result);
-            if (_callback != null)
-                _callback(this);
         }
     }
 }
