@@ -47,9 +47,8 @@ namespace ReverseProxy
                 HttpWebRequest _request = (HttpWebRequest)HttpWebRequest.Create(_uri);
                 _request.Method = context.Request.HttpMethod;
 
-                //TODO: HTTPWebRequest is not supporting  adding headers, find a work around
-                //foreach (string _header in GetFilteredHeaders(context.Request.Headers.AllKeys))
-                //    _request.Headers.Add(_header, context.Request.Headers[_header]);
+                foreach (string _header in GetFilteredHeaders(__translation.headers,context.Request.Headers.AllKeys))
+                    _request.Headers.Add(_header, context.Request.Headers[_header]);
 
                 return new WebRequestResult(_request, __translation, cb, context, extraData);
             }
@@ -64,14 +63,9 @@ namespace ReverseProxy
             WebRequestResult _state = (WebRequestResult)result;
             if (_state.response != null)
             {
-                WebResponse _response = _state.response;
-                HttpContext _context = _state.context;
-                ProxyTranslation __translation = _state.translation;
+                _AddHeadersToResponse(_state.response, _state.context, _state.translation);
 
-                foreach (string _header in GetFilteredHeaders(__translation.headers, _response.Headers.AllKeys))
-                    _context.Response.AddHeader(_header, _response.Headers[_header]);
-
-                CopyStream(_response.GetResponseStream(), (_context.Response.OutputStream));
+                CopyStream(_state.response.GetResponseStream(), (_state.context.Response.OutputStream));
             }
             else if (_state.exception != null)
             {
@@ -85,9 +79,16 @@ namespace ReverseProxy
                 else {
                     _state.context.Response.StatusCode = (int)__response.StatusCode;
                     _state.context.Response.StatusDescription = __response.StatusDescription;
+                    _AddHeadersToResponse(__response, _state.context, _state.translation);
                     _state.context.Response.End();
                 }
             }
+        }
+
+        private void _AddHeadersToResponse(WebResponse pResponse, HttpContext pContext, ProxyTranslation pTranslation)
+        {
+            foreach (string _header in GetFilteredHeaders(pTranslation.headers, pResponse.Headers.AllKeys))
+                pContext.Response.AddHeader(_header, pResponse.Headers[_header]);
         }
 
         public bool IsReusable
