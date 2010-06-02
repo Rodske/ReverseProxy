@@ -43,18 +43,25 @@ namespace ReverseProxy
                 string __path = context.Request.AppRelativeCurrentExecutionFilePath; // Needs to be relative so it matches the values on the web.config
                 if (__path.StartsWith("~")) __path= __path.Substring(1); // stripping the ~
                 ProxyTranslation __translation = ((ProxyTranslation)_translations[__path]);
-                Uri _uri = new Uri(string.Format("{0}{1}?{2}", __translation.destination, context.Request.PathInfo, context.Request.QueryString));
-                HttpWebRequest _request = (HttpWebRequest)HttpWebRequest.Create(_uri);
-                _request.Method = context.Request.HttpMethod;
+                if (__translation != null)
+                {
+                    Uri _uri = new Uri(string.Format("{0}{1}?{2}", __translation.destination, context.Request.PathInfo, context.Request.QueryString));
+                    HttpWebRequest _request = (HttpWebRequest)HttpWebRequest.Create(_uri);
+                    _request.Method = context.Request.HttpMethod;
 
-                foreach (string _header in GetFilteredHeaders(__translation.headers,context.Request.Headers.AllKeys))
-                    _request.Headers.Add(_header, context.Request.Headers[_header]);
+                    foreach (string _header in GetFilteredHeaders(__translation.headers, context.Request.Headers.AllKeys))
+                        _request.Headers.Add(_header, context.Request.Headers[_header]);
 
-                return new WebRequestResult(_request, __translation, cb, context, extraData);
+                    return new WebRequestResult(_request, __translation, cb, context, extraData);
+                }
+                else 
+                {
+                    throw new EntryPointNotFoundException(string.Format("Can't find a suitable translation for {0}", __path));
+                }
             }
             else
             {
-                return null;
+                throw new InvalidOperationException("Proxy is Disabled");
             }
         }
 
