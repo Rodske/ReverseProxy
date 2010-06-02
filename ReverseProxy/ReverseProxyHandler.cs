@@ -43,8 +43,7 @@ namespace ReverseProxy
                 string __path = context.Request.AppRelativeCurrentExecutionFilePath; // Needs to be relative so it matches the values on the web.config
                 if (__path.StartsWith("~")) __path= __path.Substring(1); // stripping the ~
                 ProxyTranslation __translation = ((ProxyTranslation)_translations[__path]);
-                Uri _uri = new Uri(string.Format("{0}?{1}", __translation.destination, context.Request.QueryString));
-
+                Uri _uri = new Uri(string.Format("{0}{1}?{2}", __translation.destination, context.Request.PathInfo, context.Request.QueryString));
                 HttpWebRequest _request = (HttpWebRequest)HttpWebRequest.Create(_uri);
                 _request.Method = context.Request.HttpMethod;
 
